@@ -1,4 +1,17 @@
+from flask import Flask
 from clickhouse_driver import Client
+from settings import *
+
+
+# Connect to DB
+
+client = Client(host=CHDB_HOST,
+                port=CHDB_PORT,
+                database=CHDB_DATABASE,
+                user=CHDB_USER,
+                password=CHDB_PASSWORD,
+                client_name='logger-server',
+                settings={'use_numpy': True})
 
 if __name__ == "__main__":
     # run import
@@ -10,21 +23,7 @@ else:
     pass
 
 # Now web-server code starts
-
-from flask import Flask
-from settings import *
-
 app = Flask(__name__)
-
-
-# Config DB connection
-client = Client(host=CHDB_HOST,
-                port=CHDB_PORT,
-                database=CHDB_DATABASE,
-                user=CHDB_USER,
-                password=CHDB_PASSWORD,
-                client_name='logger-server',
-                settings={'use_numpy': True})
 
 @app.route('/')
 def root():
@@ -32,6 +31,9 @@ def root():
 
 @app.route('/test')
 def test():
-    return str(client.execute(
-        'SELECT * FROM system.numbers LIMIT 10000',
-        columnar=True))
+    def return_data():
+        d = client.execute_iter(
+        'SELECT * FROM system.numbers LIMIT 10000')
+        for row in d:
+            yield str(f"{row[0]}\n")
+    return return_data(), {"Content-Type": "text/csv"}
