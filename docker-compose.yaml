@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  db:
+    image: clickhouse:25.3.2.39-jammy
+    ports:
+      - "9000:9000" # Native client port
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse-initdb:/docker-entrypoint-initdb.d
+    restart: on-failure
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_DB: logger
+      CLICKHOUSE_USER: test
+      CLICKHOUSE_PASSWORD: test
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: python-backend
+    ports:
+      - "5000:5000" # Flask default port
+    environment:
+      CHDB_HOST: db
+      CHDB_PORT: 19000
+      CHDB_DATABASE: logger
+      CHDB_USER: test
+      CHDB_PASSWORD: test
+    depends_on:
+      - db
+    restart: always
+
+volumes:
+  clickhouse_data:

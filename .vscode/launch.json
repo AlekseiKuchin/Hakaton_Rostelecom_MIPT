@@ -13,6 +13,16 @@
                 "run"
             ],
             "jinja": true
+        },
+        {
+            "name": "Python: import file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "logfile1.log"
+            ],
         }
     ]
 }

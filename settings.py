@@ -1,5 +1,0 @@
-CHDB_HOST="localhost"
-CHDB_PORT="19000"
-CHDB_DATABASE="logger"
-CHDB_USER = "test"
-CHDB_PASSWORD = "test"
