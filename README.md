@@ -2,21 +2,17 @@
 
 Installing dependencies:
 ```bash
-pip install flask
-pip install clickhouse-driver[numpy]
+pip install flask clickhouse-driver pandas pyarrow
 ```
 
 ### DB
 
-To run clickhouse db using docker:
+Starting DB:
 ```bash
-# See https://hub.docker.com/_/clickhouse
-docker run -it \
-    --ulimit nofile=262144:262144 \
-    -p 18123:8123 -p 19000:9000 \
-    -e CLICKHOUSE_DB=logger \
-    -e CLICKHOUSE_USER=test \
-    -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-    -e CLICKHOUSE_PASSWORD=test \
-    clickhouse:25.3.2.39-jammy
+docker-compose up -d db
+```
+
+Importing data (from `logfile1.log`):
+```bash
+python3 logger.py logfile1.log
 ```

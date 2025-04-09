@@ -1,11 +1,50 @@
 from datetime import datetime
+import itertools
 import os
 import sys
-from flask import Flask, send_file
+from flask import Flask, send_file, Response
 from io import BytesIO, TextIOWrapper
 from clickhouse_driver import Client
 #import pyarrow.parquet as pq
 import re
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# For parquet export
+parquet_logs_schema = pa.schema([
+    ('ip', pa.string()),
+    ('timestamp', pa.date32()),
+    ('method', pa.string()),
+    ('path', pa.string()),
+    ('protocol', pa.string()),
+    ('status', pa.int32()),
+    ('bytes_sent', pa.int32()),
+    ('referrer', pa.string()),
+    ('user_agent', pa.string()),
+    ('response_time', pa.int32()),
+])
+
+# Python 3.11 or lesser does not have itertools.batched (https://stackoverflow.com/a/8998040)
+def batched_it(iterable, n):
+    "Batch data into iterators of length n. The last batch may be shorter."
+    # batched('ABCDEFG', 3) --> ABC DEF G
+    if n < 1:
+        raise ValueError('n must be at least one')
+    it = iter(iterable)
+    while True:
+        chunk_it = itertools.islice(it, n)
+        try:
+            first_el = next(chunk_it)
+        except StopIteration:
+            return
+        yield itertools.chain((first_el,), chunk_it)
+
+# Chunk the rows into arrow batches (https://stackoverflow.com/a/73771478)
+def parquet_get_batches(rows_iterable, chunk_size, schema):
+    for it in batched_it(rows_iterable, chunk_size):
+        pad = pd.DataFrame(it, columns=schema.names)
+        yield pa.RecordBatch.from_pandas(pad, schema=schema, preserve_index=False)
 
 # Config from ENV
 CHDB_HOST = os.getenv('CHDB_HOST', 'localhost')
@@ -54,7 +93,6 @@ def apache2_parse_log(text: TextIOWrapper):
             log_data['timestamp'] = parse_datetime(log_data['timestamp'])
             yield log_data
 
-
 # Main app
 if __name__ == "__main__":
     # run import
@@ -95,18 +133,21 @@ def test():
         'SELECT * FROM apache_logs LIMIT 100')
         for row in d:
             yield str(f"{row[0]} {row[1]}\n")
-    return return_data(), {"Content-Type": "text/csv"}
+    return Response(response=return_data(), content_type="text/csv")
 
 @app.route('/export_parquet')
 def export_parquet():
-    buffer = BytesIO()
-    buffer.write(b'Just some letters.')
-    # Or you can encode it to bytes.
-    # buffer.write('Just some letters.'.encode('utf-8'))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name='a_file.txt',
-        mimetype='text/csv'
-    )
+    def return_data():
+        rows = client.execute_iter('SELECT * FROM apache_logs LIMIT 30000')
+        batches = parquet_get_batches(rows_iterable=rows, chunk_size=50, schema=parquet_logs_schema)
+        buffer = BytesIO()
+        with pq.ParquetWriter(buffer, schema=parquet_logs_schema, compression='zstd') as writer:
+            for batch in batches:
+                buffer.flush()
+                writer.write_batch(batch)
+                buffer.seek(0)
+                yield buffer.read()
+            buffer.flush()
+        buffer.seek(0)
+        yield buffer.read()
+    return Response(response=return_data(), content_type="application/vnd.apache.parquet")
