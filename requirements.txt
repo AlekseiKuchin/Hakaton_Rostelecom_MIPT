@@ -1,0 +1,4 @@
+flask==3.1.0
+clickhouse-driver==0.2.9
+pyarrow==19.0.1
+pandas==2.2.3

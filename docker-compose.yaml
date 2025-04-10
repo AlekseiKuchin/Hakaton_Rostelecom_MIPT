@@ -8,7 +8,6 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse-initdb:/docker-entrypoint-initdb.d
-    restart: on-failure
     environment:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
       CLICKHOUSE_DB: logger
@@ -18,7 +17,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: python-backend
     ports:
       - "5000:5000" # Flask default port
     environment:
@@ -27,9 +25,6 @@ services:
       CHDB_DATABASE: logger
       CHDB_USER: test
       CHDB_PASSWORD: test
-    depends_on:
-      - db
-    restart: always
 
 volumes:
   clickhouse_data:

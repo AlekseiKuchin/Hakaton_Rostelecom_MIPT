@@ -1,14 +1,19 @@
-FROM debian:bookworm-slim
+FROM debian:bookworm
+
+WORKDIR /root
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3-flask && \
+    apt-get install -yq python3 python3-pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-COPY logger.py /logger.py
-COPY static /static
+COPY requirements.txt /root/requirements.txt
 
-ENTRYPOINT ["python3", "-m", "flask", "--app", "logger", "run"]
+RUN pip3 install --break-system-packages -r requirements.txt
+
+COPY logger.py /root/logger.py
+COPY static /root/static
+
+ENTRYPOINT ["python3", "-m", "flask", "--app=logger", "run", "--host=0.0.0.0"]
 
 EXPOSE 5000
