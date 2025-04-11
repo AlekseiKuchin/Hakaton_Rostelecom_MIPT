@@ -2,14 +2,16 @@ from datetime import datetime
 import itertools
 import os
 import sys
-from flask import Flask, send_file, Response
+from flask import Flask, Response
 from io import BytesIO, TextIOWrapper
 from clickhouse_driver import Client
-#import pyarrow.parquet as pq
 import re
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import plotly
+import plotly.express as px
+import json
 
 # For parquet export
 parquet_logs_schema = pa.schema([
@@ -126,19 +128,23 @@ app = Flask(__name__)
 def root():
     return app.send_static_file('index.html')
 
-@app.route('/test')
-def test():
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('favicon.ico')
+
+@app.route('/api/export/csv/<int:limit>')
+def test(limit: int):
     def return_data():
         d = client.execute_iter(
-        'SELECT * FROM apache_logs LIMIT 100')
+        f'SELECT * FROM apache_logs LIMIT {limit}')
         for row in d:
             yield str(f"{row[0]} {row[1]}\n")
     return Response(response=return_data(), content_type="text/csv")
 
-@app.route('/export_parquet')
-def export_parquet():
+@app.route('/api/export/parquet/<int:limit>')
+def export_parquet(limit: int):
     def return_data():
-        rows = client.execute_iter('SELECT * FROM apache_logs LIMIT 30000')
+        rows = client.execute_iter(f'SELECT * FROM apache_logs LIMIT {limit}')
         batches = parquet_get_batches(rows_iterable=rows, chunk_size=50, schema=parquet_logs_schema)
         buffer = BytesIO()
         with pq.ParquetWriter(buffer, schema=parquet_logs_schema, compression='zstd') as writer:
@@ -151,3 +157,10 @@ def export_parquet():
         buffer.seek(0)
         yield buffer.read()
     return Response(response=return_data(), content_type="application/vnd.apache.parquet")
+
+@app.route('/api/graph_show/graph1')
+def graph1_show():
+    df = px.data.gapminder().query("country=='Canada'")
+    fig = px.line(df, x="year", y="lifeExp", title='Life expectancy in Canada')
+    graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+    return Response(response=graphJSON, status=200, mimetype="application/json")
