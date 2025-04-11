@@ -1,18 +1,5 @@
-### Backend dependencies
+### Deploying (for development)
 
-Installing dependencies:
-```bash
-pip install flask clickhouse-driver pandas pyarrow
-```
-
-### DB
-
-Starting DB:
-```bash
-docker-compose up -d db
-```
-
-Importing data (from `logfile1.log`):
-```bash
-python3 logger.py logfile1.log
-```
+1. Start DB: `docker-compose up -d db`
+2. Import data: `python3 logger.py logfile1.log`
+3. Start backend: `python -m flask --app=logger run` (or run in VS code)
