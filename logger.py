@@ -160,7 +160,7 @@ def export_parquet(limit: int):
 
 @app.route('/api/graph_show/graph1')
 def graph1_show():
-    df = px.data.gapminder().query("country=='Canada'")
-    fig = px.line(df, x="year", y="lifeExp", title='Life expectancy in Canada')
+    df = client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 10')
+    fig = px.line(df, x="timestamp", y="response_time", title='Timestamp to response_time')
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
     return Response(response=graphJSON, status=200, mimetype="application/json")
