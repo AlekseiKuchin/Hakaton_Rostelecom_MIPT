@@ -2,8 +2,8 @@ from datetime import datetime
 import itertools
 import os
 import sys
-from flask import Flask, Response
-from io import BytesIO, TextIOWrapper
+from flask import Flask, request, Response
+import io
 from clickhouse_driver import Client
 import re
 import pandas as pd
@@ -77,7 +77,7 @@ apache2_regex = re.compile(
     r'(?P<response_time>\d+)$'
 )
 
-def apache2_parse_log(text: TextIOWrapper):
+def apache2_parse_log(text: io.TextIOWrapper):
     line_i = 0
     for line in text:
         def parse_datetime(dt_string):
@@ -94,6 +94,31 @@ def apache2_parse_log(text: TextIOWrapper):
             log_data['response_time'] = int(log_data['response_time'])
             log_data['timestamp'] = parse_datetime(log_data['timestamp'])
             yield log_data
+
+
+def iterable_to_stream(iterable, buffer_size=io.DEFAULT_BUFFER_SIZE):
+    """
+    Lets you use an iterable (e.g. a generator) that yields bytestrings as a read-only
+    input stream.
+
+    The stream implements Python 3's newer I/O API (available in Python 2's io module).
+    For efficiency, the stream is buffered.
+    """
+    class IterStream(io.RawIOBase):
+        def __init__(self):
+            self.leftover = None
+        def readable(self):
+            return True
+        def readinto(self, b):
+            try:
+                l = len(b)  # We're supposed to return at most this much
+                chunk = self.leftover or next(iterable)
+                output, self.leftover = chunk[:l], chunk[l:]
+                b[:len(output)] = output
+                return len(output)
+            except StopIteration:
+                return 0    # indicate EOF
+    return io.BufferedReader(IterStream(), buffer_size=buffer_size)
 
 # Main app
 if __name__ == "__main__":
@@ -132,8 +157,25 @@ def root():
 def favicon():
     return app.send_static_file('favicon.ico')
 
+@app.route('/api/import/apache_log', methods=['POST'])
+def import_apache_log():
+    def get_stream_bytes():
+        bytes_left = int(request.headers.get('content-length'))
+        chunk_size = 5120
+        while bytes_left > 0:
+            chunk = request.stream.read(chunk_size)
+            bytes_left -= len(chunk)
+            yield chunk
+    stream = io.TextIOWrapper(iterable_to_stream(get_stream_bytes()))
+    client.execute(
+            query='INSERT INTO apache_logs VALUES',
+            params=apache2_parse_log(stream)
+        )
+    res = json.dumps({"status": "success"})
+    return Response(response=res, status=200, mimetype="application/json")
+
 @app.route('/api/export/csv/<int:limit>')
-def test(limit: int):
+def export_csv(limit: int):
     def return_data():
         d = client.execute_iter(
         f'SELECT * FROM apache_logs LIMIT {limit}')
@@ -146,7 +188,7 @@ def export_parquet(limit: int):
     def return_data():
         rows = client.execute_iter(f'SELECT * FROM apache_logs LIMIT {limit}')
         batches = parquet_get_batches(rows_iterable=rows, chunk_size=50, schema=parquet_logs_schema)
-        buffer = BytesIO()
+        buffer = io.BytesIO()
         with pq.ParquetWriter(buffer, schema=parquet_logs_schema, compression='zstd') as writer:
             for batch in batches:
                 buffer.flush()
