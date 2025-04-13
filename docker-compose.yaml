@@ -3,8 +3,6 @@ version: '3.8'
 services:
   db:
     image: clickhouse:25.3.2.39-jammy
-    ports:
-      - "9000:9000" # Native client port
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse-initdb:/docker-entrypoint-initdb.d
@@ -18,7 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "80:5000" # Flask default port
+      - "8050:5000" # Flask default port
     environment:
       CHDB_HOST: db
       CHDB_PORT: 9000
