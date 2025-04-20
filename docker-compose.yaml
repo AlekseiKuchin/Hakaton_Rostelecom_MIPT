@@ -6,6 +6,8 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse-initdb:/docker-entrypoint-initdb.d
+#    ports:
+#      - "9000:9000" # Native client port
     environment:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
       CLICKHOUSE_DB: logger
