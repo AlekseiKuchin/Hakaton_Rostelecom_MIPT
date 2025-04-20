@@ -3,6 +3,10 @@ console.log("test");
 var previousPage = null; // variable to store the previous page
 var previousButton = null; // variable to store the previous button
 
+// See https://stackoverflow.com/a/64874674
+function downloadUrl(url){
+    window.open(url, '_self');
+}
 
 // For import page (called by event on button)
 async function apacheLogUpload(file, elemProgress, elemMessage) {
@@ -29,8 +33,13 @@ function pageActionStart() {
             var graph = document.getElementById('graph1_chart');
             var progress = document.getElementById('graph1_progress');
             fetch('/api/graph_show/graph1').then(async response => {
-                const data = await response.json();
-                Plotly.newPlot(graph, data, {});
+                const got_data = await response.json();
+                var layout = got_data.layout;
+                layout['autosize'] = true;
+                layout['useResizeHandler'] = true;
+                layout['width'] = "100%";
+                Plotly.newPlot(graph, got_data.data, layout, {responsive: true});
+                Plotly.Plots.resize(graph);
                 progress.style.display = 'none';
                 graph.style.display = 'block';
             }).catch(error => {
@@ -42,6 +51,10 @@ function pageActionStart() {
             var message = document.querySelector('#import_form h3');
             progress.style.display = 'none';
             message.style.display = 'none';
+            break;
+        case "export_csv":
+            break;
+        case "export_parquet":
             break;
         default:
             alert("Unknown page " + targetPageId);
@@ -60,6 +73,10 @@ function pageActionEnd() {
             Plotly.purge(graph);
             break;
         case "import":
+            break;
+        case "export_csv":
+            break;
+        case "export_parquet":
             break;
         default:
             alert("Unknown page " + targetPageId);
@@ -98,6 +115,7 @@ document.addEventListener("DOMContentLoaded", function () {
             show_page(button, targetPage);
         });
     });
+    // Import apache2 log page
     {
         const button = document.querySelector('#import_form input[type=submit]');
         button.addEventListener("click", function (event) {
@@ -108,5 +126,24 @@ document.addEventListener("DOMContentLoaded", function () {
             apacheLogUpload(elemFile.files[0], elemProgress, elemMessage);
         });
     }
-    var progress = document.getElementById('graph1_progress');
+    // Export to CSV page
+    {
+        const button = document.querySelector('#export_csv_form input[type=submit]');
+        button.addEventListener("click", function (event) {
+            event.preventDefault()
+            const elem = document.querySelector('#export_csv_form input[type=number]');
+            var number = elem.value ? elem.value: 0;
+            downloadUrl("/api/export/csv/"+number)
+        });
+    }
+    // Export to parquet page
+    {
+        const button = document.querySelector('#export_parquet_form input[type=submit]');
+        button.addEventListener("click", function (event) {
+            event.preventDefault()
+            const elem = document.querySelector('#export_parquet_form input[type=number]');
+            var number = elem.value ? elem.value: 0;
+            downloadUrl("/api/export/parquet/"+number)
+        });
+    }
 })

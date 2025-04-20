@@ -42,8 +42,8 @@
                         </summary>
                         <ul dir="rtl">
                             <li><a href="#import">Import apache access.log</a></li>
-                            <li><a href="#parquet">Export DB to parquet</a></li>
-                            <li><a href="#db_csv">Export DB to CSV</a></li>
+                            <li><a href="#export_parquet">Export DB to parquet</a></li>
+                            <li><a href="#export_csv">Export DB to CSV</a></li>
                         </ul>
                     </details>
                 </li>
@@ -53,49 +53,50 @@
     <!-- ./ Header -->
     <!-- Main -->
     <main class="container">
-        <!-- Preview -->
+        <!-- Import -->
         <section id="import" class="page" style="display:none">
             <h2>Upload apache2 log</h2>
-            <form id="import_form" action="/api/import/apache_log" method="post" >
+            <form id="import_form" method="post">
                 <progress id="import_progress" value="0" max="100"></progress>
                 <h3>Upload complete!</h3>
-                <fieldset role="group">
-                  <input type="file" name="apache2_log">
-                  <input type="submit" value="Upload" />
-                </fieldset>
-              </form>
+                <label>
+                    File to upload (access.log):
+                    <fieldset role="group">
+                        <input type="file" name="apache2_log">
+                        <input type="submit" value="Upload" />
+                    </fieldset>
+                </label>
+            </form>
         </section>
-        <!-- ./ Preview -->
-        <!-- Buttons-->
-        <section id="parquet" class="page" style="display:none">
-            <h2>Buttons</h2>
-            <p class="grid">
-                <button>Primary</button>
-                <button class="secondary">Secondary</button>
-                <button class="contrast">Contrast</button>
-            </p>
-            <p class="grid">
-                <button class="outline">Primary outline</button>
-                <button class="outline secondary">Secondary outline</button>
-                <button class="outline contrast">Contrast outline</button>
-            </p>
+        <!-- ./ Import -->
+        <!-- Export parquet -->
+        <section id="export_parquet" class="page" style="display:none">
+            <h2>Export to apache parquet file</h2>
+            <form id="export_parquet_form" method="post">
+                <label>
+                    Limit of lines (set to 0 for no limit)
+                    <fieldset role="group">
+                        <input type="number" name="limit" placeholder="0" />
+                        <input type="submit" value="Download" />
+                    </fieldset>
+                </label>
+            </form>
         </section>
-        <!-- ./ Buttons -->
-        <!-- Test-->
-        <section id="db_csv" class="page" style="display:none">
-            <h2>Buttons</h2>
-            <p class="grid">
-                <button>Primary</button>
-                <button class="secondary">Secondary</button>
-                <button class="contrast">Contrast</button>
-            </p>
-            <p class="grid">
-                <button class="outline">Primary outline</button>
-                <button class="outline secondary">Secondary outline</button>
-                <button class="outline contrast">Contrast outline</button>
-            </p>
+        <!-- ./ Export parquet -->
+        <!-- Export CSV -->
+        <section id="export_csv" class="page" style="display:none">
+            <h2>Export to CSV file</h2>
+            <form id="export_csv_form" method="post">
+                <label>
+                    Limit of lines (set to 0 for no limit)
+                    <fieldset role="group">
+                        <input type="number" name="limit" placeholder="0" />
+                        <input type="submit" value="Download" />
+                    </fieldset>
+                </label>
+            </form>
         </section>
-        <!-- ./ Test -->
+        <!-- ./ Export CSV -->
         <!-- Modal -->
         <section id="graph1" class="page" style="display:none">
             <h2>Test graph1</h2>

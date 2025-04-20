@@ -1,4 +1,3 @@
-from datetime import datetime
 import itertools
 import os
 import sys
@@ -12,6 +11,8 @@ import pyarrow.parquet as pq
 import plotly
 import plotly.express as px
 import json
+import datetime
+import logging
 
 # For parquet export
 parquet_logs_schema = pa.schema([
@@ -82,7 +83,7 @@ def apache2_parse_log(text: io.TextIOWrapper):
     for line in text:
         def parse_datetime(dt_string):
             dt_string = dt_string.replace("+0300", "").strip()
-            return datetime.strptime(dt_string, "%Y-%m-%d %H:%M:%S")
+            return datetime.datetime.strptime(dt_string, "%Y-%m-%d %H:%M:%S")
         line_i += 1
         if line_i % 100000 == 0:
             print(f"Checkpoint: line {line_i}...")
@@ -131,20 +132,23 @@ if __name__ == "__main__":
     if not os.path.isfile(import_file):
         print(f"File {import_file} is not a file.")
         exit(2)
-    print("Importing...")
+    print(f"Import (local) started on {datetime.datetime.now()}...")
     with open(import_file, 'r') as file:
         # Insert parsed logs into ClickHouse
         client.execute(
             query='INSERT INTO apache_logs VALUES',
             params=apache2_parse_log(file)
         )
-    print("Import completed. To start web-server, please use WGSI.")
+    print(f"Import (local) completed on {datetime.datetime.now()}. To start web-server, please use WGSI.")
     print("For example, running dev-server: `python -m flask --app logger run`.")
     exit(0)
 else:
     # Wil will start web-server now
     pass
 
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Now web-server code starts
 app = Flask(__name__)
@@ -159,29 +163,46 @@ def favicon():
 
 @app.route('/api/import/apache_log', methods=['POST'])
 def import_apache_log():
-    def get_stream_bytes():
-        bytes_left = int(request.headers.get('content-length'))
-        chunk_size = 5120
-        while bytes_left > 0:
-            chunk = request.stream.read(chunk_size)
-            bytes_left -= len(chunk)
-            yield chunk
-    stream = io.TextIOWrapper(iterable_to_stream(get_stream_bytes()))
-    client.execute(
-            query='INSERT INTO apache_logs VALUES',
-            params=apache2_parse_log(stream)
-        )
-    res = json.dumps({"status": "success"})
+    try:
+        print(f"Import (web) started on {datetime.datetime.now()}...")
+        def get_stream_bytes():
+            bytes_left = int(request.headers.get('content-length'))
+            chunk_size = 5120
+            while bytes_left > 0:
+                chunk = request.stream.read(chunk_size)
+                bytes_left -= len(chunk)
+                yield chunk
+        stream = io.TextIOWrapper(iterable_to_stream(get_stream_bytes()))
+        client.execute(
+                query='INSERT INTO apache_logs VALUES',
+                params=apache2_parse_log(stream)
+            )
+        res = json.dumps({"status": "success"})
+        print(f"Import (web) completed on {datetime.datetime.now()}.")
+    except Exception as e:
+        logging.critical(f"Import (web) failed on {datetime.datetime.now()}!")
+        raise e
     return Response(response=res, status=200, mimetype="application/json")
 
-@app.route('/api/export/csv/<int:limit>')
+@app.route('/api/db/count_rows', methods=['GET'])
+def count_rows():
+    answ = client.execute("SELECT count() FROM apache_logs")
+    res = json.dumps({"rows": int(answ[0][0])})
+    return Response(response=res, status=200, mimetype="application/json")
+
+@app.route('/api/export/csv/<int:limit>', methods=['GET'])
 def export_csv(limit: int):
     def return_data():
-        d = client.execute_iter(
-        f'SELECT * FROM apache_logs LIMIT {limit}')
-        for row in d:
-            yield str(f"{row[0]} {row[1]}\n")
-    return Response(response=return_data(), content_type="text/csv")
+        if limit == 0:
+            sql_req = 'SELECT * FROM apache_logs'
+        else:
+            sql_req =  f'SELECT * FROM apache_logs LIMIT {limit}'
+        rows = client.execute_iter(sql_req)
+        for row in rows:
+            yield ", ".join([str(i) for i in row ])+"\n"
+    resp = Response(response=return_data(), content_type="text/csv")
+    resp.headers['Content-Disposition']='attachment; filename="export.csv"'
+    return resp
 
 @app.route('/api/export/parquet/<int:limit>')
 def export_parquet(limit: int):
@@ -198,7 +219,9 @@ def export_parquet(limit: int):
             buffer.flush()
         buffer.seek(0)
         yield buffer.read()
-    return Response(response=return_data(), content_type="application/vnd.apache.parquet")
+    resp = Response(response=return_data(), content_type="application/vnd.apache.parquet")
+    resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
+    return resp
 
 @app.route('/api/graph_show/graph1')
 def graph1_show():
