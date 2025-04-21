@@ -66,26 +66,44 @@ function getDBstatus(page_id) {
     });
 }
 
+function drawGraph(targetPageId, params) {
+    var graph = document.querySelector('#'+targetPageId+' div.chart');
+    var progress = document.querySelector('#'+targetPageId+' progress');
+    fetch('/api/graph_show/'+targetPageId).then(async response => {
+        const got_data = await response.json();
+        graph.style.display = 'block';
+        var layout = got_data.layout;
+        layout['autosize'] = true;
+        layout['useResizeHandler'] = true;
+        layout['width'] = "100%";
+        Plotly.newPlot(graph, got_data.data, layout, { responsive: true });
+        Plotly.Plots.resize(graph);
+        progress.style.display = 'none';
+    }).catch(error => {
+        console.error('Error fetching data:', error);
+    });
+}
+
+function destroyGraph(targetPageId, params) {
+    var graph = document.querySelector('#'+targetPageId+' div.chart');
+    var progress = document.querySelector('#'+targetPageId+' progress');
+    progress.style.display = 'block';
+    graph.style.display = 'none';
+    Plotly.purge(graph);
+}
+
 // On page show
 function pageActionStart() {
     const targetPageId = previousButton.getAttribute("href").substring(1);
     switch (targetPageId) {
         case "graph1":
-            var graph = document.getElementById('graph1_chart');
-            var progress = document.getElementById('graph1_progress');
-            fetch('/api/graph_show/graph1').then(async response => {
-                const got_data = await response.json();
-                graph.style.display = 'block';
-                var layout = got_data.layout;
-                layout['autosize'] = true;
-                layout['useResizeHandler'] = true;
-                layout['width'] = "100%";
-                Plotly.newPlot(graph, got_data.data, layout, { responsive: true });
-                Plotly.Plots.resize(graph);
-                progress.style.display = 'none';
-            }).catch(error => {
-                console.error('Error fetching data:', error);
-            });
+            drawGraph(targetPageId, {});
+            break;
+        case "graph2":
+            drawGraph(targetPageId, {});
+            break;
+        case "graph3":
+            drawGraph(targetPageId, {});
             break;
         case "import":
             getDBstatus(targetPageId);
@@ -110,11 +128,13 @@ function pageActionEnd() {
     const targetPageId = previousButton.getAttribute("href").substring(1);
     switch (targetPageId) {
         case "graph1":
-            var graph = document.getElementById('graph1_chart');
-            var progress = document.getElementById('graph1_progress');
-            progress.style.display = 'block';
-            graph.style.display = 'none';
-            Plotly.purge(graph);
+            destroyGraph(targetPageId, {})
+            break;
+        case "graph2":
+            destroyGraph(targetPageId, {})
+            break;
+        case "graph3":
+            destroyGraph(targetPageId, {})
             break;
         case "import":
             break;

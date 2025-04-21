@@ -89,8 +89,21 @@ db_connection = clickhouse_driver.dbapi.Connection(
                 database=CHDB_DATABASE,
                 user=CHDB_USER,
                 password=CHDB_PASSWORD,
-                client_name='logger-server',
+                client_name='logger-server-async',
                 settings={'use_numpy': False, 'insert_block_size': 1000}) # do not set use_numpy=True
+
+# Функция для получения минимальной и максимальной даты из таблицы logs
+def get_date_range():
+    with db_connection.cursor() as cursor:
+        result = cursor._client.query_dataframe("SELECT MIN(timestamp), MAX(timestamp) FROM apache_logs")
+        if result.empty:
+            return '2023-01-01', '2023-12-31'
+        # Явно форматируем даты
+        min_date = pd.to_datetime(result.iloc[0, 0]).strftime('%Y-%m-%d')
+        max_date = pd.to_datetime(result.iloc[0, 1]).strftime('%Y-%m-%d')
+        return min_date, max_date
+
+min_date, max_date = get_date_range()
 
 # Apache2 logs parser
 
@@ -314,7 +327,62 @@ def export_parquet(limit: int):
 @app.route('/api/graph_show/graph1')
 def graph1_show():
     with db_connection.cursor() as cursor:
-        df = cursor._client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 1000')
-        fig = px.line(df, x="timestamp", y="response_time", title='Timestamp to response_time')
+        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_requests FROM apache_logs"
+        start_date, end_date = None, None
+        if start_date and end_date:
+            # Явно преобразуем даты в формат YYYY-MM-DD
+            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
+            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+        query += " GROUP BY date ORDER BY date"
+        df = cursor._client.query_dataframe(query)
+        fig = px.line(df, x='date', y='total_requests', title=None, line_shape='linear')
+        fig.update_layout(
+            xaxis_title="Дата",
+            yaxis_title="Запросы",
+            showlegend=False,
+        )
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
+
+@app.route('/api/graph_show/graph2')
+def graph2_show():
+    with db_connection.cursor() as cursor:
+        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_failures FROM apache_logs WHERE status >= 400"
+        start_date, end_date = None, None
+        if start_date and end_date:
+            # Явно преобразуем даты в формат YYYY-MM-DD
+            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
+            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+        query += " GROUP BY date ORDER BY date"
+        df = cursor._client.query_dataframe(query)
+        fig = px.line(df, x='date', y='total_failures', title=None, line_shape='linear')
+        fig.update_layout(
+            xaxis_title="Дата",
+            yaxis_title="Отказы",
+            showlegend=False,
+        )
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
+
+@app.route('/api/graph_show/graph3')
+def graph3_show():
+    with db_connection.cursor() as cursor:
+        query = "SELECT ip, COUNT(*) as request_count FROM apache_logs WHERE 1=1"
+        start_date, end_date = None, None
+        if start_date and end_date:
+            # Явно преобразуем даты в формат YYYY-MM-DD
+            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
+            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+        query += " GROUP BY ip ORDER BY request_count DESC LIMIT 10"
+        df = cursor._client.query_dataframe(query)
+        fig = px.bar(df, x='ip', y='request_count', title=None, text_auto=True)
+        fig.update_layout(
+            xaxis_title="IP",
+            yaxis_title="Запросы",
+            showlegend=False,
+        )
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
