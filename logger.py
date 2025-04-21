@@ -18,7 +18,7 @@ import datetime
 import logging
 import shutil
 
-tmp_files=[]
+tmp_files = []
 
 # Logging setup
 logging.basicConfig()
@@ -39,10 +39,7 @@ parquet_logs_schema = pa.schema([
     ('response_time', pa.int32()),
 ])
 
-# Python 3.11 or lesser does not have itertools.batched (https://stackoverflow.com/a/8998040)
 def batched_it(iterable, n):
-    "Batch data into iterators of length n. The last batch may be shorter."
-    # batched('ABCDEFG', 3) --> ABC DEF G
     if n < 1:
         raise ValueError('n must be at least one')
     it = iter(iterable)
@@ -54,7 +51,6 @@ def batched_it(iterable, n):
             return
         yield itertools.chain((first_el,), chunk_it)
 
-# Chunk the rows into arrow batches (https://stackoverflow.com/a/73771478)
 def parquet_get_batches(rows_iterable, chunk_size, schema):
     for it in batched_it(rows_iterable, chunk_size):
         pad = pd.DataFrame(it, columns=schema.names)
@@ -62,14 +58,12 @@ def parquet_get_batches(rows_iterable, chunk_size, schema):
 
 def default_lines_stream_limit():
     usage_info = shutil.disk_usage(tempfile.gettempdir())
-    available_disk = usage_info.free
-    available_disk -= 1024 * 1024
+    available_disk = usage_info.free - 1024 * 1024
     logger.info("Env LINES_STREAM_LIMIT is not set. Setting default one.")
     if available_disk <= 0:
         logger.warning("Available system RAM is too small. Setting LINES_STREAM_LIMIT=1000.")
         return 1000
     else:
-        # Dataframe of 1 000 size is 16 164
         rows_limit = available_disk // 20
         logger.info(f"Setting LINES_STREAM_LIMIT={rows_limit}")
         return rows_limit
@@ -82,18 +76,16 @@ CHDB_USER = os.getenv('CHDB_USER', 'test')
 CHDB_PASSWORD = os.getenv('CHDB_PASSWORD', 'test')
 LINES_STREAM_LIMIT = int(os.getenv('LINES_STREAM_LIMIT', default_lines_stream_limit()))
 
-# Connect to DB
-
 db_connection = clickhouse_driver.dbapi.Connection(
-                host=CHDB_HOST,
-                port=CHDB_PORT,
-                database=CHDB_DATABASE,
-                user=CHDB_USER,
-                password=CHDB_PASSWORD,
-                client_name='logger-server-async',
-                settings={'use_numpy': False, 'insert_block_size': 1000}) # do not set use_numpy=True
+    host=CHDB_HOST,
+    port=CHDB_PORT,
+    database=CHDB_DATABASE,
+    user=CHDB_USER,
+    password=CHDB_PASSWORD,
+    client_name='logger-server-async',
+    settings={'use_numpy': False, 'insert_block_size': 1000}
+)
 
-# Функция для создания пустого графика с сообщением
 def create_empty_graph(message="Нет данных для отображения", font_color='#34495e'):
     fig = go.Figure()
     fig.add_annotation(
@@ -111,8 +103,6 @@ def create_empty_graph(message="Нет данных для отображени�
         margin=dict(l=40, r=40, t=20, b=40),
     )
     return fig
-
-# Apache2 logs parser
 
 apache2_regex = re.compile(
     r'^(?P<ip>\S+)\s-\s-\s\[(?P<timestamp>[^\]]+)\]\s'
@@ -142,15 +132,7 @@ def apache2_parse_log(text: io.TextIOWrapper):
             log_data['timestamp'] = parse_datetime(log_data['timestamp'])
             yield log_data
 
-
 def iterable_to_stream(iterable, buffer_size=io.DEFAULT_BUFFER_SIZE):
-    """
-    Lets you use an iterable (e.g. a generator) that yields bytestrings as a read-only
-    input stream.
-
-    The stream implements Python 3's newer I/O API (available in Python 2's io module).
-    For efficiency, the stream is buffered.
-    """
     class IterStream(io.RawIOBase):
         def __init__(self):
             self.leftover = None
@@ -158,13 +140,13 @@ def iterable_to_stream(iterable, buffer_size=io.DEFAULT_BUFFER_SIZE):
             return True
         def readinto(self, b):
             try:
-                l = len(b)  # We're supposed to return at most this much
+                l = len(b)
                 chunk = self.leftover or next(iterable)
                 output, self.leftover = chunk[:l], chunk[l:]
                 b[:len(output)] = output
                 return len(output)
             except StopIteration:
-                return 0    # indicate EOF
+                return 0
     return io.BufferedReader(IterStream(), buffer_size=buffer_size)
 
 def get_db_size():
@@ -185,9 +167,7 @@ def tmp_del_after():
         os.unlink(tmp.name)
         tmp_files.remove(tmp)
 
-# Main app
 if __name__ == "__main__":
-    # run import
     if len(sys.argv) > 1:
         import_file = sys.argv[1]
     else:
@@ -200,7 +180,6 @@ if __name__ == "__main__":
     logger.info(f"Import (local) started on {datetime.datetime.now()}...")
     with open(import_file, 'r') as file:
         with db_connection.cursor() as cursor:
-            # Insert parsed logs into ClickHouse
             cursor.execute(
                 operation='INSERT INTO apache_logs VALUES',
                 parameters=apache2_parse_log(file)
@@ -209,11 +188,7 @@ if __name__ == "__main__":
     print_db_size()
     print("To start web-server, please use WGSI. For example, running dev-server: `python -m flask --app logger run`.")
     exit(0)
-else:
-    # Wil will start web-server now
-    pass
 
-# Now web-server code starts
 app = Flask(__name__)
 
 @app.route('/')
@@ -239,12 +214,10 @@ def import_apache_log():
                 yield chunk
         stream = io.TextIOWrapper(iterable_to_stream(get_stream_bytes()))
         with db_connection.cursor() as cursor:
-            # Insert parsed logs into ClickHouse
             cursor.execute(
                 operation='INSERT INTO apache_logs VALUES',
                 parameters=apache2_parse_log(stream)
             )
-        # DB will not update immediately, wait for its update
         new_count = count
         while new_count == count:
             time.sleep(0.5)
@@ -260,7 +233,7 @@ def import_apache_log():
 @app.route('/api/db/db_size', methods=['GET'])
 def db_size_json():
     info = get_db_size()
-    res = json.dumps({"count": info[0], "size":  info[1], "size_human": info[2]})
+    res = json.dumps({"count": info[0], "size": info[1], "size_human": info[2]})
     return Response(response=res, status=200, mimetype="application/json")
 
 @app.route('/api/db/clean', methods=['POST'])
@@ -276,12 +249,12 @@ def export_csv(limit: int):
         if limit == 0:
             sql_req = 'SELECT * FROM apache_logs'
         else:
-            sql_req =  f'SELECT * FROM apache_logs LIMIT {limit}'
+            sql_req = f'SELECT * FROM apache_logs LIMIT {limit}'
         with db_connection.cursor() as cursor:
             cursor.set_stream_results(True, 1000)
             cursor.execute(sql_req)
             for row in cursor:
-                yield bytes(", ".join([str(i) for i in row ])+"\n", encoding="UTF-8")
+                yield bytes(", ".join([str(i) for i in row]) + "\n", encoding="UTF-8")
     stream = iterable_to_stream(return_data())
     if limit and limit <= LINES_STREAM_LIMIT:
         tmp = tempfile.NamedTemporaryFile(delete_on_close=False)
@@ -289,11 +262,11 @@ def export_csv(limit: int):
         tmp.close()
         tmp_files.append(tmp)
         resp = send_file(path_or_file=tmp.name, mimetype="text/csv", as_attachment=False, download_name="export.csv")
-        resp.direct_passthrough=False
+        resp.direct_passthrough = False
         resp.call_on_close(tmp_del_after)
     else:
         resp = Response(response=stream, content_type="text/csv")
-        resp.headers['Content-Disposition']='attachment; filename="export.csv"'
+        resp.headers['Content-Disposition'] = 'attachment; filename="export.csv"'
     return resp
 
 @app.route('/api/export/parquet/<int:limit>')
@@ -303,7 +276,7 @@ def export_parquet(limit: int):
             if limit == 0:
                 sql_req = 'SELECT * FROM apache_logs'
             else:
-                sql_req =  f'SELECT * FROM apache_logs LIMIT {limit}'
+                sql_req = f'SELECT * FROM apache_logs LIMIT {limit}'
             cursor.set_stream_results(True, 1000)
             cursor.execute(sql_req)
             batches = parquet_get_batches(rows_iterable=cursor, chunk_size=50, schema=parquet_logs_schema)
@@ -324,11 +297,11 @@ def export_parquet(limit: int):
         tmp.close()
         tmp_files.append(tmp)
         resp = send_file(path_or_file=tmp.name, mimetype="application/vnd.apache.parquet", as_attachment=False, download_name="export.parquet")
-        resp.direct_passthrough=False
+        resp.direct_passthrough = False
         resp.call_on_close(tmp_del_after)
     else:
         resp = Response(response=stream, content_type="application/vnd.apache.parquet")
-        resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
+        resp.headers['Content-Disposition'] = 'attachment; filename="export.parquet"'
     return resp
 
 @app.route('/api/db/get_date_range')
@@ -344,63 +317,63 @@ def get_date_range():
         resp = json.dumps({"min_time": min_date, "max_time": max_date})
         return Response(response=resp, status=200, mimetype="application/json")
 
-@app.route('/api/graph_show/graph1/<int:start_time>/<int:end_time>')
-def graph1_show(start_time: int, end_time: int):
+@app.route('/api/graph_show/graph1')
+def graph1_show():
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
-        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_requests FROM apache_logs "
+        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_requests FROM apache_logs WHERE 1=1"
         if start_time and end_time:
-            # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            query += f"WHERE timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
         query += " GROUP BY date ORDER BY date"
         df = cursor._client.query_dataframe(query)
-        fig = px.line(df, x='date', y='total_requests', title="График запросов", line_shape='linear')
-        fig.update_layout(
-            xaxis_title="Дата",
-            yaxis_title="Запросы",
-            showlegend=False,
-        )
+        if df.empty:
+            fig = create_empty_graph("Нет данных о запросах")
+        else:
+            fig = px.line(df, x='date', y='total_requests', title="График запросов", line_shape='linear')
+            fig.update_layout(xaxis_title="Дата", yaxis_title="Запросы", showlegend=False)
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
-@app.route('/api/graph_show/graph2/<int:start_time>/<int:end_time>')
-def graph2_show(start_time: int, end_time: int):
+@app.route('/api/graph_show/graph2')
+def graph2_show():
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
         query = "SELECT toDate(timestamp) as date, COUNT(*) as total_failures FROM apache_logs WHERE status >= 400"
         if start_time and end_time:
-            # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
         query += " GROUP BY date ORDER BY date"
         df = cursor._client.query_dataframe(query)
-        fig = px.line(df, x='date', y='total_failures', title="График отказов", line_shape='linear')
-        fig.update_layout(
-            xaxis_title="Дата",
-            yaxis_title="Отказы",
-            showlegend=False,
-        )
+        if df.empty:
+            fig = create_empty_graph("Нет данных об отказах")
+        else:
+            fig = px.line(df, x='date', y='total_failures', title="График отказов", line_shape='linear')
+            fig.update_layout(xaxis_title="Дата", yaxis_title="Отказы", showlegend=False)
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
-@app.route('/api/graph_show/graph3/<int:start_time>/<int:end_time>')
-def graph3_show(start_time: int, end_time: int):
+@app.route('/api/graph_show/graph3')
+def graph3_show():
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
-        query = "SELECT ip, COUNT(*) as request_count FROM apache_logs "
+        query = "SELECT ip, COUNT(*) as request_count FROM apache_logs WHERE 1=1"
         if start_time and end_time:
-            # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
-            query += f"WHERE timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
         query += " GROUP BY ip ORDER BY request_count DESC LIMIT 10"
         df = cursor._client.query_dataframe(query)
-        fig = px.bar(df, x='ip', y='request_count', title="График топ-10 IP", text_auto=True)
-        fig.update_layout(
-            xaxis_title="IP",
-            yaxis_title="Запросы",
-            showlegend=False,
-        )
+        if df.empty:
+            fig = create_empty_graph("Нет данных о топ-10 IP")
+        else:
+            fig = px.bar(df, x='ip', y='request_count', title="График топ-10 IP", text_auto=True)
+            fig.update_layout(xaxis_title="IP", yaxis_title="Запросы", showlegend=False)
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
@@ -421,18 +394,12 @@ def graph4_show():
         GROUP BY status_group
         """
         df = cursor._client.query_dataframe(query)
-        if df.empty or 'status_group' not in df.columns or 'count' not in df.columns:
-            fig = create_empty_graph("Нет данных о кодах состояния", font_color='#34495e')
+        if df.empty:
+            fig = create_empty_graph("Нет данных о кодах состояния")
         else:
-            fig = px.pie(df, names='status_group', values='count', title=None)
+            fig = px.pie(df, names='status_group', values='count', title="Распределение кодов состояния")
             fig.update_traces(textinfo='percent+label')
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(family="Inter, sans-serif", size=12, color='#34495e'),
-                showlegend=True,
-                margin=dict(l=40, r=40, t=20, b=40)
-            )
+            fig.update_layout(showlegend=True)
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
@@ -446,22 +413,25 @@ def graph5_show():
         ORDER BY date
         """
         df = cursor._client.query_dataframe(query)
-        if df.empty or 'date' not in df.columns or 'avg_response_time' not in df.columns:
-            fig = create_empty_graph("Нет данных о времени ответа", font_color='#34495e')
+        if df.empty:
+            fig = create_empty_graph("Нет данных о времени ответа")
         else:
-            fig = px.line(df, x='date', y='avg_response_time', title=None, line_shape='linear')
-            fig.update_traces(line_color='#1976d2', line_width=2)
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(family="Inter, sans-serif", size=12, color='#34495e'),
-                xaxis_title="Дата",
-                yaxis_title="Среднее время ответа (мс)",
-                showlegend=False,
-                margin=dict(l=40, r=40, t=20, b=40),
-                xaxis=dict(showgrid=True, gridcolor='rgba(200,200,200,0.2)'),
-                yaxis=dict(showgrid=True, gridcolor='rgba(200,200,200,0.2)'),
-                hovermode='x unified'
-            )
+            fig = px.line(df, x='date', y='avg_response_time', title="Среднее время ответа по дням", line_shape='linear')
+            fig.update_layout(xaxis_title="Дата", yaxis_title="Среднее время ответа (мс)", showlegend=False)
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
+
+@app.route('/api/details/ip/<ip>')
+def ip_details(ip):
+    with db_connection.cursor() as cursor:
+        query = """
+        SELECT timestamp, method, path, status, bytes_sent, response_time
+        FROM apache_logs
+        WHERE ip = %s
+        ORDER BY timestamp DESC
+        LIMIT 100
+        """
+        safe_ip = ip.strip()
+        df = cursor._client.query_dataframe(query, parameters=[safe_ip])
+        result = df.to_dict(orient='records')
+        return Response(response=json.dumps(result), status=200, mimetype="application/json")
