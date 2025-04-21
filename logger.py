@@ -12,6 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import plotly
 import plotly.express as px
+import plotly.graph_objects as go
 import json
 import datetime
 import logging
@@ -92,18 +93,24 @@ db_connection = clickhouse_driver.dbapi.Connection(
                 client_name='logger-server-async',
                 settings={'use_numpy': False, 'insert_block_size': 1000}) # do not set use_numpy=True
 
-# Функция для получения минимальной и максимальной даты из таблицы logs
-def get_date_range():
-    with db_connection.cursor() as cursor:
-        result = cursor._client.query_dataframe("SELECT MIN(timestamp), MAX(timestamp) FROM apache_logs")
-        if result.empty:
-            return '2023-01-01', '2023-12-31'
-        # Явно форматируем даты
-        min_date = pd.to_datetime(result.iloc[0, 0]).strftime('%Y-%m-%d')
-        max_date = pd.to_datetime(result.iloc[0, 1]).strftime('%Y-%m-%d')
-        return min_date, max_date
-
-min_date, max_date = get_date_range()
+# Функция для создания пустого графика с сообщением
+def create_empty_graph(message="Нет данных для отображения", font_color='#34495e'):
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5,
+        showarrow=False,
+        font=dict(size=20, color=font_color),
+    )
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        margin=dict(l=40, r=40, t=20, b=40),
+    )
+    return fig
 
 # Apache2 logs parser
 
@@ -324,19 +331,31 @@ def export_parquet(limit: int):
         resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
     return resp
 
-@app.route('/api/graph_show/graph1')
-def graph1_show():
+@app.route('/api/db/get_date_range')
+def get_date_range():
     with db_connection.cursor() as cursor:
-        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_requests FROM apache_logs"
-        start_date, end_date = None, None
-        if start_date and end_date:
+        result = cursor._client.query_dataframe("SELECT MIN(timestamp), MAX(timestamp) FROM apache_logs")
+        if result.empty:
+            min_date = datetime.datetime.fromisoformat('2023-01-01').timestamp()
+            max_date = datetime.datetime.fromisoformat('2023-01-01').timestamp()
+        else:
+            min_date = result.iloc[0, 0].timestamp()
+            max_date = result.iloc[0, 1].timestamp()
+        resp = json.dumps({"min_time": min_date, "max_time": max_date})
+        return Response(response=resp, status=200, mimetype="application/json")
+
+@app.route('/api/graph_show/graph1/<int:start_time>/<int:end_time>')
+def graph1_show(start_time: int, end_time: int):
+    with db_connection.cursor() as cursor:
+        query = "SELECT toDate(timestamp) as date, COUNT(*) as total_requests FROM apache_logs "
+        if start_time and end_time:
             # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
-            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
-            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
+            query += f"WHERE timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
         query += " GROUP BY date ORDER BY date"
         df = cursor._client.query_dataframe(query)
-        fig = px.line(df, x='date', y='total_requests', title=None, line_shape='linear')
+        fig = px.line(df, x='date', y='total_requests', title="График запросов", line_shape='linear')
         fig.update_layout(
             xaxis_title="Дата",
             yaxis_title="Запросы",
@@ -345,19 +364,18 @@ def graph1_show():
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
-@app.route('/api/graph_show/graph2')
-def graph2_show():
+@app.route('/api/graph_show/graph2/<int:start_time>/<int:end_time>')
+def graph2_show(start_time: int, end_time: int):
     with db_connection.cursor() as cursor:
         query = "SELECT toDate(timestamp) as date, COUNT(*) as total_failures FROM apache_logs WHERE status >= 400"
-        start_date, end_date = None, None
-        if start_date and end_date:
+        if start_time and end_time:
             # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
-            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
             query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
         query += " GROUP BY date ORDER BY date"
         df = cursor._client.query_dataframe(query)
-        fig = px.line(df, x='date', y='total_failures', title=None, line_shape='linear')
+        fig = px.line(df, x='date', y='total_failures', title="График отказов", line_shape='linear')
         fig.update_layout(
             xaxis_title="Дата",
             yaxis_title="Отказы",
@@ -366,23 +384,84 @@ def graph2_show():
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
-@app.route('/api/graph_show/graph3')
-def graph3_show():
+@app.route('/api/graph_show/graph3/<int:start_time>/<int:end_time>')
+def graph3_show(start_time: int, end_time: int):
     with db_connection.cursor() as cursor:
-        query = "SELECT ip, COUNT(*) as request_count FROM apache_logs WHERE 1=1"
-        start_date, end_date = None, None
-        if start_date and end_date:
+        query = "SELECT ip, COUNT(*) as request_count FROM apache_logs "
+        if start_time and end_time:
             # Явно преобразуем даты в формат YYYY-MM-DD
-            start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
-            end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
-            query += f" AND timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+            start_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(end_time//1000).strftime("%Y-%m-%d %H:%M:%S")
+            query += f"WHERE timestamp BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
         query += " GROUP BY ip ORDER BY request_count DESC LIMIT 10"
         df = cursor._client.query_dataframe(query)
-        fig = px.bar(df, x='ip', y='request_count', title=None, text_auto=True)
+        fig = px.bar(df, x='ip', y='request_count', title="График топ-10 IP", text_auto=True)
         fig.update_layout(
             xaxis_title="IP",
             yaxis_title="Запросы",
             showlegend=False,
         )
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
+
+@app.route('/api/graph_show/graph4')
+def graph4_show():
+    with db_connection.cursor() as cursor:
+        query = """
+        SELECT 
+            CASE 
+                WHEN status BETWEEN 200 AND 299 THEN '2xx (Успешные)'
+                WHEN status BETWEEN 300 AND 399 THEN '3xx (Перенаправления)'
+                WHEN status BETWEEN 400 AND 499 THEN '4xx (Клиентские ошибки)'
+                WHEN status BETWEEN 500 AND 599 THEN '5xx (Серверные ошибки)'
+                ELSE 'Другие'
+            END as status_group,
+            COUNT(*) as count
+        FROM apache_logs
+        GROUP BY status_group
+        """
+        df = cursor._client.query_dataframe(query)
+        if df.empty or 'status_group' not in df.columns or 'count' not in df.columns:
+            fig = create_empty_graph("Нет данных о кодах состояния", font_color='#34495e')
+        else:
+            fig = px.pie(df, names='status_group', values='count', title=None)
+            fig.update_traces(textinfo='percent+label')
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(family="Inter, sans-serif", size=12, color='#34495e'),
+                showlegend=True,
+                margin=dict(l=40, r=40, t=20, b=40)
+            )
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
+
+@app.route('/api/graph_show/graph5')
+def graph5_show():
+    with db_connection.cursor() as cursor:
+        query = """
+        SELECT toDate(timestamp) as date, AVG(response_time) as avg_response_time
+        FROM apache_logs
+        GROUP BY date
+        ORDER BY date
+        """
+        df = cursor._client.query_dataframe(query)
+        if df.empty or 'date' not in df.columns or 'avg_response_time' not in df.columns:
+            fig = create_empty_graph("Нет данных о времени ответа", font_color='#34495e')
+        else:
+            fig = px.line(df, x='date', y='avg_response_time', title=None, line_shape='linear')
+            fig.update_traces(line_color='#1976d2', line_width=2)
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(family="Inter, sans-serif", size=12, color='#34495e'),
+                xaxis_title="Дата",
+                yaxis_title="Среднее время ответа (мс)",
+                showlegend=False,
+                margin=dict(l=40, r=40, t=20, b=40),
+                xaxis=dict(showgrid=True, gridcolor='rgba(200,200,200,0.2)'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(200,200,200,0.2)'),
+                hovermode='x unified'
+            )
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")

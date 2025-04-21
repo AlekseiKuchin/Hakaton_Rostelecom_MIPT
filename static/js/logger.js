@@ -50,9 +50,9 @@ async function apacheLogUpload(file, elemProgress, elemMessage) {
     req.send(file);
 }
 
-function getDBstatus(page_id) {
-    const elem_count = document.querySelector('#' + page_id + ' article p:nth-of-type(1) b');
-    const elem_size = document.querySelector('#' + page_id + ' article p:nth-of-type(2) b');
+function getDBstatus(targetPageId) {
+    const elem_count = document.querySelector('#' + targetPageId + ' article p:nth-of-type(1) b');
+    const elem_size = document.querySelector('#' + targetPageId + ' article p:nth-of-type(2) b');
     elem_count.setAttribute('aria-busy', true);
     elem_size.setAttribute('aria-busy', true);
     fetch('/api/db/db_size').then(async response => {
@@ -66,7 +66,24 @@ function getDBstatus(page_id) {
     });
 }
 
+function getDBDateRange(targetPageId) {
+    var time_start = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_start]');
+    var time_end = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_end]');
+    time_start.setAttribute('aria-busy', true);
+    time_end.setAttribute('aria-busy', true);
+    fetch('/api/db/get_date_range').then(async response => {
+        const got_data = await response.json();
+        time_start.valueAsNumber = got_data['min_time']*1000;
+        time_end.valueAsNumber = got_data['max_time']*1000;
+        time_start.setAttribute('aria-busy', false);
+        time_end.setAttribute('aria-busy', false);
+    }).catch(error => {
+        console.error('Error fetching data:', error);
+    });
+}
+
 function drawGraph(targetPageId, params) {
+    // Elems
     var graph = document.querySelector('#'+targetPageId+' div.chart');
     var progress = document.querySelector('#'+targetPageId+' progress');
     fetch('/api/graph_show/'+targetPageId).then(async response => {
@@ -84,6 +101,48 @@ function drawGraph(targetPageId, params) {
     });
 }
 
+function drawGraph_with_date(targetPageId, params) {
+    // Elems
+    var graph = document.querySelector('#'+targetPageId+' div.chart');
+    var progress = document.querySelector('#'+targetPageId+' progress');
+    var time_start = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_start]');
+    var time_end = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_end]');
+    var time_start_value = ! isNaN(time_start.valueAsNumber) ? time_start.valueAsNumber : 0;
+    var time_end_value = ! isNaN(time_end.valueAsNumber) ? time_end.valueAsNumber : 0;
+    fetch('/api/graph_show/'+targetPageId+'/'+time_start_value+'/'+time_end_value).then(async response => {
+        const got_data = await response.json();
+        graph.style.display = 'block';
+        var layout = got_data.layout;
+        layout['autosize'] = true;
+        layout['useResizeHandler'] = true;
+        layout['width'] = "100%";
+        Plotly.newPlot(graph, got_data.data, layout, { responsive: true });
+        Plotly.Plots.resize(graph);
+        progress.style.display = 'none';
+    }).catch(error => {
+        console.error('Error fetching data:', error);
+    });
+}
+
+function drawGraph_with_date_init(targetPageId, params) {
+    getDBDateRange(targetPageId);
+    {
+        const button = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_start]');
+        button.addEventListener("change", function (event) {
+            destroyGraph(targetPageId, {})
+            drawGraph_with_date(targetPageId);
+        });
+    }
+    {
+        const button = document.querySelector('#' + targetPageId + ' form fieldset label input[name=date_end]');
+        button.addEventListener("change", function (event) {
+            destroyGraph(targetPageId, {})
+            drawGraph_with_date(targetPageId);
+        });
+    }
+}
+
+
 function destroyGraph(targetPageId, params) {
     var graph = document.querySelector('#'+targetPageId+' div.chart');
     var progress = document.querySelector('#'+targetPageId+' progress');
@@ -97,13 +156,19 @@ function pageActionStart() {
     const targetPageId = previousButton.getAttribute("href").substring(1);
     switch (targetPageId) {
         case "graph1":
-            drawGraph(targetPageId, {});
+            drawGraph_with_date(targetPageId, {});
             break;
         case "graph2":
-            drawGraph(targetPageId, {});
+            drawGraph_with_date(targetPageId, {});
             break;
         case "graph3":
-            drawGraph(targetPageId, {});
+            drawGraph_with_date(targetPageId, {});
+            break;
+        case "graph4":
+            drawGraph(targetPageId, {})
+            break;
+        case "graph5":
+            drawGraph(targetPageId, {})
             break;
         case "import":
             getDBstatus(targetPageId);
@@ -134,6 +199,12 @@ function pageActionEnd() {
             destroyGraph(targetPageId, {})
             break;
         case "graph3":
+            destroyGraph(targetPageId, {})
+            break;
+        case "graph4":
+            destroyGraph(targetPageId, {})
+            break;
+        case "graph5":
             destroyGraph(targetPageId, {})
             break;
         case "import":
@@ -210,6 +281,9 @@ document.addEventListener("DOMContentLoaded", function () {
             downloadUrl("/api/export/parquet/" + number)
         });
     }
+    drawGraph_with_date_init("graph1");
+    drawGraph_with_date_init("graph2");
+    drawGraph_with_date_init("graph3");
   // Init
   themeSwitcher.init();
 })
