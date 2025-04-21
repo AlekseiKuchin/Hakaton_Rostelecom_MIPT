@@ -267,7 +267,6 @@ def export_csv(limit: int):
         tmp = tempfile.NamedTemporaryFile(delete_on_close=False)
         tmp.writelines(stream)
         tmp.close()
-        print(tmp.name)
         tmp_files.append(tmp)
         resp = send_file(path_or_file=tmp.name, mimetype="text/csv", as_attachment=False, download_name="export.csv")
         resp.direct_passthrough=False
@@ -303,9 +302,8 @@ def export_parquet(limit: int):
         tmp = tempfile.NamedTemporaryFile(delete_on_close=False)
         tmp.writelines(stream)
         tmp.close()
-        print(tmp.name)
         tmp_files.append(tmp)
-        resp = send_file(path_or_file=stream, mimetype="application/vnd.apache.parquet", as_attachment=False, download_name="export.parquet")
+        resp = send_file(path_or_file=tmp.name, mimetype="application/vnd.apache.parquet", as_attachment=False, download_name="export.parquet")
         resp.direct_passthrough=False
         resp.call_on_close(tmp_del_after)
     else:
