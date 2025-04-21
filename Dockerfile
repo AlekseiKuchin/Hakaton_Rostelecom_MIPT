@@ -1,11 +1,6 @@
-FROM debian:bookworm
+FROM python:3.13.3-bookworm
 
 WORKDIR /root
-
-RUN apt-get update && \
-    apt-get install -yq python3 python3-pip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /root/requirements.txt
 
