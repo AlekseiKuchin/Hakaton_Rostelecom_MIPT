@@ -434,6 +434,41 @@ def graph5_show():
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
 
+@app.route('/api/graph_show/heatmap')
+def graph_heatmap():
+    with db_connection.cursor() as cursor:
+        query = """
+        SELECT 
+            toDayOfWeek(timestamp) AS day_of_week,
+            toHour(timestamp) AS hour,
+            COUNT(*) AS request_count
+        FROM apache_logs
+        GROUP BY day_of_week, hour
+        ORDER BY day_of_week, hour
+        """
+        df = cursor._client.query_dataframe(query)
+        if df.empty:
+            fig = create_empty_graph("Нет данных для тепловой карты")
+        else:
+            # Pivot: дни — строки, часы — столбцы
+            df_pivot = df.pivot(index='day_of_week', columns='hour', values='request_count').fillna(0)
+            # Переименуем дни недели в русские
+            days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+            fig = go.Figure(data=go.Heatmap(
+                z=df_pivot.values,
+                x=df_pivot.columns.astype(str),
+                y=days,
+                colorscale='YlGnBu'
+            ))
+            fig.update_layout(
+                title="Тепловая карта запросов по дням и часам",
+                xaxis_title="Час",
+                yaxis_title="День недели",
+                margin=dict(l=40, r=40, t=40, b=40),
+            )
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
+
 @app.route('/api/details/ip/<ip>')
 def ip_details(ip):
     start_time = request.args.get('start_time')
