@@ -4,9 +4,10 @@
 <head>
     <title>Logger</title>
     <!-- CSS and JS-->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.orange.min.css">
     <link rel="stylesheet" href="/static/css/logger.css">
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
+    <script src="/static/js/minimal-theme-switcher.js"></script>
     <script src="/static/js/logger.js"></script>
 </head>
 
@@ -19,7 +20,16 @@
         </hgroup>
         <nav>
             <ul>
-                <li><strong>Logger</strong></li>
+                <li>
+                    <details class="dropdown">
+                      <summary role="button" class="secondary">Theme</summary>
+                      <ul>
+                        <li><a data-theme-switcher="auto">Auto</a></li>
+                        <li><a data-theme-switcher="light">Light</a></li>
+                        <li><a data-theme-switcher="dark">Dark</a></li>
+                      </ul>
+                    </details>
+                </li>
             </ul>
             <ul>
                 <li><a href="#" class="secondary">Services</a></li>
@@ -56,6 +66,11 @@
         <!-- Import -->
         <section id="import" class="page" style="display:none">
             <h2>Upload apache2 log</h2>
+            <article>
+                <h4>DB status</h4>
+                <p>Rows count: <b>???</b></p>
+                <p>Size: <b>???</b></p>
+            </article>
             <form id="import_form" method="post">
                 <progress id="import_progress" value="0" max="100"></progress>
                 <h3>Upload complete!</h3>
@@ -72,6 +87,11 @@
         <!-- Export parquet -->
         <section id="export_parquet" class="page" style="display:none">
             <h2>Export to apache parquet file</h2>
+            <article>
+                <h4>DB status</h4>
+                <p>Rows count: <b>???</b></p>
+                <p>Size: <b>???</b></p>
+            </article>
             <form id="export_parquet_form" method="post">
                 <label>
                     Limit of lines (set to 0 for no limit)
@@ -86,6 +106,11 @@
         <!-- Export CSV -->
         <section id="export_csv" class="page" style="display:none">
             <h2>Export to CSV file</h2>
+            <article>
+                <h4>DB status</h4>
+                <p>Rows count: <b>???</b></p>
+                <p>Size: <b>???</b></p>
+            </article>
             <form id="export_csv_form" method="post">
                 <label>
                     Limit of lines (set to 0 for no limit)
@@ -125,8 +150,7 @@
     </main>
     <!-- Footer -->
     <footer class="container">
-        <small>Built with <a href="https://picocss.com">Pico</a> •
-            <a href="https://github.com/picocss/examples/blob/master/v2-html/index.html">Source code</a></small>
+        <small>MIPT Hackathon 2025</small>
     </footer>
     <!-- ./ Footer -->
 </body>
