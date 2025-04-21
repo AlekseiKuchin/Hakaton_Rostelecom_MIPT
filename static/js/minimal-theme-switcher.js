@@ -37,7 +37,6 @@ const themeSwitcher = {
         button.addEventListener(
           "click",
           (event) => {
-            console.log(event);
             event.preventDefault();
             // Set scheme
             this.scheme = button.getAttribute(this.buttonAttribute);
