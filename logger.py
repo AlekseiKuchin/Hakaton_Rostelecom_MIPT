@@ -379,6 +379,8 @@ def graph3_show():
 
 @app.route('/api/graph_show/graph4')
 def graph4_show():
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
         query = """
         SELECT 
@@ -391,8 +393,13 @@ def graph4_show():
             END as status_group,
             COUNT(*) as count
         FROM apache_logs
-        GROUP BY status_group
+        WHERE 1=1
         """
+        if start_time and end_time:
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
+        query += " GROUP BY status_group"
         df = cursor._client.query_dataframe(query)
         if df.empty:
             fig = create_empty_graph("Нет данных о кодах состояния")
@@ -405,13 +412,19 @@ def graph4_show():
 
 @app.route('/api/graph_show/graph5')
 def graph5_show():
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
         query = """
         SELECT toDate(timestamp) as date, AVG(response_time) as avg_response_time
         FROM apache_logs
-        GROUP BY date
-        ORDER BY date
+        WHERE 1=1
         """
+        if start_time and end_time:
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
+        query += " GROUP BY date ORDER BY date"
         df = cursor._client.query_dataframe(query)
         if df.empty:
             fig = create_empty_graph("Нет данных о времени ответа")
@@ -423,15 +436,20 @@ def graph5_show():
 
 @app.route('/api/details/ip/<ip>')
 def ip_details(ip):
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
     with db_connection.cursor() as cursor:
         query = """
         SELECT timestamp, method, path, status, bytes_sent, response_time
         FROM apache_logs
         WHERE ip = %s
-        ORDER BY timestamp DESC
-        LIMIT 100
         """
+        if start_time and end_time:
+            start_date = datetime.datetime.fromtimestamp(int(start_time)).strftime("%Y-%m-%d %H:%M:%S")
+            end_date = datetime.datetime.fromtimestamp(int(end_time)).strftime("%Y-%m-%d %H:%M:%S")
+            query += f" AND timestamp BETWEEN toDateTime('{start_date}') AND toDateTime('{end_date}')"
+        query += " ORDER BY timestamp DESC LIMIT 100"
         safe_ip = ip.strip()
         df = cursor._client.query_dataframe(query, parameters=[safe_ip])
         result = df.to_dict(orient='records')
-        return Response(response=json.dumps(result), status=200, mimetype="application/json")
+    return Response(response=json.dumps(result), status=200, mimetype="application/json")
