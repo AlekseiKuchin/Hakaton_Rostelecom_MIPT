@@ -196,7 +196,6 @@ def import_apache_log():
                 operation='INSERT INTO apache_logs VALUES',
                 parameters=apache2_parse_log(stream)
             )
-        res = json.dumps({"status": "success"})
         new_count, new_size_human = count, size_human
         # DB will not update immediately, wait for its update
         while new_count == count:
@@ -207,13 +206,21 @@ def import_apache_log():
     except Exception as e:
         logging.critical(f"Import (web) failed on {datetime.datetime.now()}!")
         raise e
-    return Response(response=res, status=200, mimetype="application/json")
+    resp = json.dumps({"status": "success"})
+    return Response(response=resp, status=200, mimetype="application/json")
 
 @app.route('/api/db/db_size', methods=['GET'])
 def db_size_json():
     info = get_db_size()
     res = json.dumps({"count": info[0], "size":  info[1], "size_human": info[2]})
     return Response(response=res, status=200, mimetype="application/json")
+
+@app.route('/api/db/clean', methods=['POST'])
+def db_clean():
+    with db_connection.cursor() as cursor:
+        cursor.execute("DELETE FROM apache_logs WHERE ip IS NOT NULL")
+    resp = json.dumps({"status": "success"})
+    return Response(response=resp, status=200, mimetype="application/json")
 
 @app.route('/api/export/csv/<int:limit>', methods=['GET'])
 def export_csv(limit: int):
