@@ -1,0 +1,6 @@
+#import_form [type=file] {
+    --pico-color: var(--pico-muted-color);
+    border: var(--pico-border-width) solid var(--pico-border-color);
+    border-radius: var(--pico-border-radius);
+    background-color: var(--pico-background-color);
+}
