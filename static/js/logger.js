@@ -16,15 +16,20 @@ function sleep(ms) {
 // For import page (called by event on button)
 async function apacheLogUpload(file, elemProgress, elemMessage) {
     elemProgress.style.display = 'block';
-    elemMessage.style.display = 'none';
+    elemMessage.style.display = 'block';
+    var started_at = new Date();
     const req = new XMLHttpRequest();
     req.upload.addEventListener("progress", function (evt) {
+        var seconds_elapsed =  ( new Date().getTime() - started_at.getTime() ) /1000;
         var percentage = (evt.loaded / evt.total * 100);
+        var bytes_per_second =  seconds_elapsed ? evt.loaded / seconds_elapsed : 0 ;
+        var remaining_bytes = evt.total - evt.loaded;
+        var seconds_remaining = seconds_elapsed ? Math.round(remaining_bytes / bytes_per_second) : 'calculating' ;
+        elemMessage.textContent = "Time left: "+seconds_remaining+" seconds.";
         elemProgress.setAttribute('value', percentage);
     });
     req.upload.addEventListener('load', async function (evt) {
         elemProgress.style.display = 'none';
-        elemMessage.style.display = 'block';
         elemProgress.setAttribute('value', 0);
         elemMessage.textContent = "File uploaded. Waiting DB update..."
     });
