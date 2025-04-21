@@ -2,7 +2,8 @@ import itertools
 import os
 import sys
 import time
-from flask import Flask, request, Response
+from flask import Flask, request, Response, send_file
+import tempfile
 import io
 import clickhouse_driver
 import re
@@ -14,6 +15,14 @@ import plotly.express as px
 import json
 import datetime
 import logging
+import shutil
+
+tmp_files=[]
+
+# Logging setup
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # For parquet export
 parquet_logs_schema = pa.schema([
@@ -50,12 +59,27 @@ def parquet_get_batches(rows_iterable, chunk_size, schema):
         pad = pd.DataFrame(it, columns=schema.names)
         yield pa.RecordBatch.from_pandas(pad, schema=schema, preserve_index=False)
 
+def default_lines_stream_limit():
+    usage_info = shutil.disk_usage(tempfile.gettempdir())
+    available_disk = usage_info.free
+    available_disk -= 1024 * 1024
+    logger.info("Env LINES_STREAM_LIMIT is not set. Setting default one.")
+    if available_disk <= 0:
+        logger.warning("Available system RAM is too small. Setting LINES_STREAM_LIMIT=1000.")
+        return 1000
+    else:
+        # Dataframe of 1 000 size is 16 164
+        rows_limit = available_disk // 20
+        logger.info(f"Setting LINES_STREAM_LIMIT={rows_limit}")
+        return rows_limit
+
 # Config from ENV
 CHDB_HOST = os.getenv('CHDB_HOST', 'localhost')
 CHDB_PORT = os.getenv('CHDB_PORT', '9000')
 CHDB_DATABASE = os.getenv('CHDB_DATABASE', 'logger')
 CHDB_USER = os.getenv('CHDB_USER', 'test')
 CHDB_PASSWORD = os.getenv('CHDB_PASSWORD', 'test')
+LINES_STREAM_LIMIT = int(os.getenv('LINES_STREAM_LIMIT', default_lines_stream_limit()))
 
 # Connect to DB
 
@@ -131,6 +155,16 @@ def get_db_size():
         size_human, size = cursor.fetchall()[0]
         return count, size, size_human
 
+def print_db_size():
+    count, _, size_human = get_db_size()
+    logger.info(f"Current db status: {count} lines, {size_human} size.")
+
+def tmp_del_after():
+    if len(tmp_files):
+        tmp = tmp_files[-1]
+        os.unlink(tmp.name)
+        tmp_files.remove(tmp)
+
 # Main app
 if __name__ == "__main__":
     # run import
@@ -142,9 +176,8 @@ if __name__ == "__main__":
     if not os.path.isfile(import_file):
         print(f"File {import_file} is not a file.")
         exit(2)
-    count, _, size_human = get_db_size()
-    print(f"Current db status: {count} lines, {size_human} size.")
-    print(f"Import (local) started on {datetime.datetime.now()}...")
+    print_db_size()
+    logger.info(f"Import (local) started on {datetime.datetime.now()}...")
     with open(import_file, 'r') as file:
         with db_connection.cursor() as cursor:
             # Insert parsed logs into ClickHouse
@@ -153,17 +186,12 @@ if __name__ == "__main__":
                 parameters=apache2_parse_log(file)
             )
     print(f"Import (local) completed on {datetime.datetime.now()}.")
-    count, _, size_human = get_db_size()
-    print(f"Current db status: {count} lines, {size_human} size.")
+    print_db_size()
     print("To start web-server, please use WGSI. For example, running dev-server: `python -m flask --app logger run`.")
     exit(0)
 else:
     # Wil will start web-server now
     pass
-
-logging.basicConfig()
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # Now web-server code starts
 app = Flask(__name__)
@@ -179,8 +207,8 @@ def favicon():
 @app.route('/api/import/apache_log', methods=['POST'])
 def import_apache_log():
     try:
-        count, _, size_human = get_db_size()
-        logging.info(f"Current db status: {count} lines, {size_human} size.")
+        count, _, _ = get_db_size()
+        print_db_size()
         logging.info(f"Import (web) started on {datetime.datetime.now()}...")
         def get_stream_bytes():
             bytes_left = int(request.headers.get('content-length'))
@@ -196,13 +224,13 @@ def import_apache_log():
                 operation='INSERT INTO apache_logs VALUES',
                 parameters=apache2_parse_log(stream)
             )
-        new_count, new_size_human = count, size_human
         # DB will not update immediately, wait for its update
+        new_count = count
         while new_count == count:
             time.sleep(0.5)
-            new_count, _, new_size_human = get_db_size()
+            new_count, _, _ = get_db_size()
         logging.info(f"Import (web) completed on {datetime.datetime.now()}.")
-        logging.info(f"Current db status: {new_count} lines, {new_size_human} size.")
+        print_db_size()
     except Exception as e:
         logging.critical(f"Import (web) failed on {datetime.datetime.now()}!")
         raise e
@@ -233,9 +261,20 @@ def export_csv(limit: int):
             cursor.set_stream_results(True, 1000)
             cursor.execute(sql_req)
             for row in cursor:
-                yield ", ".join([str(i) for i in row ])+"\n"
-    resp = Response(response=return_data(), content_type="text/csv")
-    resp.headers['Content-Disposition']='attachment; filename="export.csv"'
+                yield bytes(", ".join([str(i) for i in row ])+"\n", encoding="UTF-8")
+    stream = iterable_to_stream(return_data())
+    if limit and limit <= LINES_STREAM_LIMIT:
+        tmp = tempfile.NamedTemporaryFile(delete_on_close=False)
+        tmp.writelines(stream)
+        tmp.close()
+        print(tmp.name)
+        tmp_files.append(tmp)
+        resp = send_file(path_or_file=tmp.name, mimetype="text/csv", as_attachment=False, download_name="export.csv")
+        resp.direct_passthrough=False
+        resp.call_on_close(tmp_del_after)
+    else:
+        resp = Response(response=stream, content_type="text/csv")
+        resp.headers['Content-Disposition']='attachment; filename="export.csv"'
     return resp
 
 @app.route('/api/export/parquet/<int:limit>')
@@ -259,14 +298,25 @@ def export_parquet(limit: int):
                 buffer.flush()
             buffer.seek(0)
             yield buffer.read()
-    resp = Response(response=return_data(), content_type="application/vnd.apache.parquet")
-    resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
+    stream = iterable_to_stream(return_data())
+    if limit and limit <= LINES_STREAM_LIMIT:
+        tmp = tempfile.NamedTemporaryFile(delete_on_close=False)
+        tmp.writelines(stream)
+        tmp.close()
+        print(tmp.name)
+        tmp_files.append(tmp)
+        resp = send_file(path_or_file=stream, mimetype="application/vnd.apache.parquet", as_attachment=False, download_name="export.parquet")
+        resp.direct_passthrough=False
+        resp.call_on_close(tmp_del_after)
+    else:
+        resp = Response(response=stream, content_type="application/vnd.apache.parquet")
+        resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
     return resp
 
 @app.route('/api/graph_show/graph1')
 def graph1_show():
     with db_connection.cursor() as cursor:
-        df = cursor._client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 10')
+        df = cursor._client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 1000')
         fig = px.line(df, x="timestamp", y="response_time", title='Timestamp to response_time')
         graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         return Response(response=graphJSON, status=200, mimetype="application/json")
