@@ -1,18 +1,29 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <title>Logger</title>
-    <!-- CSS and JS-->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.orange.min.css">
     <link rel="stylesheet" href="/static/css/logger.css">
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
     <script src="/static/js/minimal-theme-switcher.js"></script>
     <script src="/static/js/logger.js"></script>
+    <style>
+        #ip-details-table {
+            margin-top: 20px;
+        }
+        #ip-details-table table {
+            width: 100%;
+        }
+        #ip-details-table th, #ip-details-table td {
+            padding: 8px;
+            text-align: left;
+        }
+        #ip-details-table th {
+            background-color: var(--secondary-background);
+        }
+    </style>
 </head>
-
 <body>
-    <!-- Header -->
     <header class="container">
         <hgroup>
             <h1>Logger</h1>
@@ -22,12 +33,12 @@
             <ul>
                 <li>
                     <details class="dropdown">
-                      <summary role="button" class="secondary">Theme</summary>
-                      <ul>
-                        <li><a data-theme-switcher="auto">Auto</a></li>
-                        <li><a data-theme-switcher="light">Light</a></li>
-                        <li><a data-theme-switcher="dark">Dark</a></li>
-                      </ul>
+                        <summary role="button" class="secondary">Theme</summary>
+                        <ul>
+                            <li><a data-theme-switcher="auto">Auto</a></li>
+                            <li><a data-theme-switcher="light">Light</a></li>
+                            <li><a data-theme-switcher="dark">Dark</a></li>
+                        </ul>
                     </details>
                 </li>
             </ul>
@@ -35,9 +46,7 @@
                 <li><a href="#" class="secondary">Services</a></li>
                 <li>
                     <details class="dropdown">
-                        <summary>
-                            Graphs
-                        </summary>
+                        <summary>Graphs</summary>
                         <ul dir="rtl">
                             <li><a href="#graph1">Graph 1</a></li>
                             <li><a href="#graph2">Graph 2</a></li>
@@ -49,9 +58,7 @@
                 </li>
                 <li>
                     <details class="dropdown">
-                        <summary>
-                            Import/export
-                        </summary>
+                        <summary>Import/export</summary>
                         <ul dir="rtl">
                             <li><a href="#import">Import apache access.log</a></li>
                             <li><a href="#export_parquet">Export DB to parquet</a></li>
@@ -62,10 +69,7 @@
             </ul>
         </nav>
     </header>
-    <!-- ./ Header -->
-    <!-- Main -->
     <main class="container">
-        <!-- Import -->
         <section id="import" class="page" style="display:none">
             <h2>Upload apache2 log</h2>
             <article>
@@ -85,8 +89,6 @@
                 </label>
             </form>
         </section>
-        <!-- ./ Import -->
-        <!-- Export parquet -->
         <section id="export_parquet" class="page" style="display:none">
             <h2>Export to apache parquet file</h2>
             <article>
@@ -104,8 +106,6 @@
                 </label>
             </form>
         </section>
-        <!-- ./ Export parquet -->
-        <!-- Export CSV -->
         <section id="export_csv" class="page" style="display:none">
             <h2>Export to CSV file</h2>
             <article>
@@ -123,69 +123,72 @@
                 </label>
             </form>
         </section>
-        <!-- ./ Export CSV -->
         <section id="graph1" class="page" style="display:none">
+            <h2>Graph 1: Количество запросов по дням</h2>
             <form>
                 <fieldset>
                     <label>
-                      Starting Date
-                      <input type="datetime-local" step="1" name="date_start" aria-label="Date">
+                        Starting Date
+                        <input type="datetime-local" name="date_start" aria-label="Date">
                     </label>
                     <label>
-                      Ending date
-                      <input type="datetime-local" step="1" name="date_end" aria-label="Date">
+                        Ending date
+                        <input type="datetime-local" name="date_end" aria-label="Date">
                     </label>
-                  </fieldset>
+                </fieldset>
             </form>
             <progress></progress>
             <div class="chart" style="display:none"></div>
         </section>
         <section id="graph2" class="page" style="display:none">
+            <h2>Graph 2: Количество отказов по дням</h2>
             <form>
                 <fieldset>
                     <label>
-                      Starting Date
-                      <input type="datetime-local" step="1" name="date_start" aria-label="Date">
+                        Starting Date
+                        <input type="datetime-local" name="date_start" aria-label="Date">
                     </label>
                     <label>
-                      Ending date
-                      <input type="datetime-local" step="1" name="date_end" aria-label="Date">
+                        Ending date
+                        <input type="datetime-local" name="date_end" aria-label="Date">
                     </label>
-                  </fieldset>
+                </fieldset>
             </form>
             <progress></progress>
             <div class="chart" style="display:none"></div>
         </section>
         <section id="graph3" class="page" style="display:none">
+            <h2>Graph 3: Топ-10 IP по количеству запросов</h2>
             <form>
                 <fieldset>
                     <label>
-                      Starting Date
-                      <input type="datetime-local" step="1" name="date_start" aria-label="Date">
+                        Starting Date
+                        <input type="datetime-local" name="date_start" aria-label="Date">
                     </label>
                     <label>
-                      Ending date
-                      <input type="datetime-local" step="1" name="date_end" aria-label="Date">
+                        Ending date
+                        <input type="datetime-local" name="date_end" aria-label="Date">
                     </label>
-                  </fieldset>
+                </fieldset>
             </form>
             <progress></progress>
             <div class="chart" style="display:none"></div>
+            <h3>Детали запросов</h3>
+            <div id="ip-details-table"></div>
         </section>
         <section id="graph4" class="page" style="display:none">
+            <h2>Graph 4: Распределение кодов состояния</h2>
             <progress></progress>
             <div class="chart" style="display:none"></div>
         </section>
         <section id="graph5" class="page" style="display:none">
+            <h2>Graph 5: Среднее время ответа по дням</h2>
             <progress></progress>
             <div class="chart" style="display:none"></div>
         </section>
     </main>
-    <!-- Footer -->
     <footer class="container">
         <small>MIPT Hackathon 2025</small>
     </footer>
-    <!-- ./ Footer -->
 </body>
-
 </html>
