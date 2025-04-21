@@ -3,6 +3,17 @@ console.log("test");
 var previousPage = null;
 var previousButton = null;
 
+function saveDateRange(id, start, end) {
+    localStorage.setItem(`date_${id}_start`, start);
+    localStorage.setItem(`date_${id}_end`, end);
+}
+function loadDateRange(id) {
+    return {
+        start: localStorage.getItem(`date_${id}_start`),
+        end: localStorage.getItem(`date_${id}_end`)
+    };
+}
+
 function downloadUrl(url) {
     window.open(url, '_self');
 }
@@ -65,6 +76,11 @@ function getDBstatus(targetPageId) {
 function getDBDateRange(targetPageId) {
     var time_start = document.querySelector('#' + targetPageId + ' form input[name=date_start]');
     var time_end = document.querySelector('#' + targetPageId + ' form input[name=date_end]');
+    // Попытаться восстановить ранее сохранённые даты
+    var stored = loadDateRange(targetPageId);
+    if (stored.start) time_start.valueAsNumber = parseInt(stored.start);
+    if (stored.end)   time_end.valueAsNumber   = parseInt(stored.end);
+
     time_start.setAttribute('aria-busy', true);
     time_end.setAttribute('aria-busy', true);
     fetch('/api/db/get_date_range').then(async response => {
@@ -272,16 +288,30 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     ["graph1", "graph2", "graph3"].forEach(pageId => {
-        const timeStartInput = document.querySelector('#' + pageId + ' form input[name=date_start]');
-        const timeEndInput = document.querySelector('#' + pageId + ' form input[name=date_end]');
-        timeStartInput.addEventListener("change", function () {
-            destroyGraph(pageId, {});
-            drawGraph(pageId, {});
-        });
-        timeEndInput.addEventListener("change", function () {
-            destroyGraph(pageId, {});
-            drawGraph(pageId, {});
-        });
+    const timeStartInput = document.querySelector('#' + pageId + ' form input[name=date_start]');
+    const timeEndInput = document.querySelector('#' + pageId + ' form input[name=date_end]');
+
+    timeStartInput.addEventListener("change", function () {
+        // Сохраняем выбранные даты в localStorage
+        saveDateRange(
+            pageId,
+            timeStartInput.valueAsNumber,
+            timeEndInput.valueAsNumber
+        );
+        destroyGraph(pageId, {});
+        drawGraph(pageId, {});
     });
+
+    timeEndInput.addEventListener("change", function () {
+        saveDateRange(
+            pageId,
+            timeStartInput.valueAsNumber,
+            timeEndInput.valueAsNumber
+        );
+        destroyGraph(pageId, {});
+        drawGraph(pageId, {});
+    });
+});
+
     themeSwitcher.init();
 });
