@@ -1,9 +1,10 @@
 import itertools
 import os
 import sys
+import time
 from flask import Flask, request, Response
 import io
-from clickhouse_driver import Client
+import clickhouse_driver
 import re
 import pandas as pd
 import pyarrow as pa
@@ -58,7 +59,8 @@ CHDB_PASSWORD = os.getenv('CHDB_PASSWORD', 'test')
 
 # Connect to DB
 
-client = Client(host=CHDB_HOST,
+db_connection = clickhouse_driver.dbapi.Connection(
+                host=CHDB_HOST,
                 port=CHDB_PORT,
                 database=CHDB_DATABASE,
                 user=CHDB_USER,
@@ -121,6 +123,14 @@ def iterable_to_stream(iterable, buffer_size=io.DEFAULT_BUFFER_SIZE):
                 return 0    # indicate EOF
     return io.BufferedReader(IterStream(), buffer_size=buffer_size)
 
+def get_db_size():
+    with db_connection.cursor() as cursor:
+        cursor.execute("SELECT count() FROM apache_logs")
+        count = cursor.fetchall()[0][0]
+        cursor.execute("SELECT formatReadableSize(sum(bytes)), sum(bytes) FROM system.parts WHERE active AND table = 'apache_logs'")
+        size_human, size = cursor.fetchall()[0]
+        return count, size, size_human
+
 # Main app
 if __name__ == "__main__":
     # run import
@@ -132,15 +142,20 @@ if __name__ == "__main__":
     if not os.path.isfile(import_file):
         print(f"File {import_file} is not a file.")
         exit(2)
+    count, _, size_human = get_db_size()
+    print(f"Current db status: {count} lines, {size_human} size.")
     print(f"Import (local) started on {datetime.datetime.now()}...")
     with open(import_file, 'r') as file:
-        # Insert parsed logs into ClickHouse
-        client.execute(
-            query='INSERT INTO apache_logs VALUES',
-            params=apache2_parse_log(file)
-        )
-    print(f"Import (local) completed on {datetime.datetime.now()}. To start web-server, please use WGSI.")
-    print("For example, running dev-server: `python -m flask --app logger run`.")
+        with db_connection.cursor() as cursor:
+            # Insert parsed logs into ClickHouse
+            cursor.execute(
+                operation='INSERT INTO apache_logs VALUES',
+                parameters=apache2_parse_log(file)
+            )
+    print(f"Import (local) completed on {datetime.datetime.now()}.")
+    count, _, size_human = get_db_size()
+    print(f"Current db status: {count} lines, {size_human} size.")
+    print("To start web-server, please use WGSI. For example, running dev-server: `python -m flask --app logger run`.")
     exit(0)
 else:
     # Wil will start web-server now
@@ -164,7 +179,9 @@ def favicon():
 @app.route('/api/import/apache_log', methods=['POST'])
 def import_apache_log():
     try:
-        print(f"Import (web) started on {datetime.datetime.now()}...")
+        count, _, size_human = get_db_size()
+        logging.info(f"Current db status: {count} lines, {size_human} size.")
+        logging.info(f"Import (web) started on {datetime.datetime.now()}...")
         def get_stream_bytes():
             bytes_left = int(request.headers.get('content-length'))
             chunk_size = 5120
@@ -173,21 +190,29 @@ def import_apache_log():
                 bytes_left -= len(chunk)
                 yield chunk
         stream = io.TextIOWrapper(iterable_to_stream(get_stream_bytes()))
-        client.execute(
-                query='INSERT INTO apache_logs VALUES',
-                params=apache2_parse_log(stream)
+        with db_connection.cursor() as cursor:
+            # Insert parsed logs into ClickHouse
+            cursor.execute(
+                operation='INSERT INTO apache_logs VALUES',
+                parameters=apache2_parse_log(stream)
             )
         res = json.dumps({"status": "success"})
-        print(f"Import (web) completed on {datetime.datetime.now()}.")
+        new_count, new_size_human = count, size_human
+        # DB will not update immediately, wait for its update
+        while new_count == count:
+            time.sleep(0.5)
+            new_count, _, new_size_human = get_db_size()
+        logging.info(f"Import (web) completed on {datetime.datetime.now()}.")
+        logging.info(f"Current db status: {new_count} lines, {new_size_human} size.")
     except Exception as e:
         logging.critical(f"Import (web) failed on {datetime.datetime.now()}!")
         raise e
     return Response(response=res, status=200, mimetype="application/json")
 
-@app.route('/api/db/count_rows', methods=['GET'])
-def count_rows():
-    answ = client.execute("SELECT count() FROM apache_logs")
-    res = json.dumps({"rows": int(answ[0][0])})
+@app.route('/api/db/db_size', methods=['GET'])
+def db_size_json():
+    info = get_db_size()
+    res = json.dumps({"count": info[0], "size":  info[1], "size_human": info[2]})
     return Response(response=res, status=200, mimetype="application/json")
 
 @app.route('/api/export/csv/<int:limit>', methods=['GET'])
@@ -197,9 +222,11 @@ def export_csv(limit: int):
             sql_req = 'SELECT * FROM apache_logs'
         else:
             sql_req =  f'SELECT * FROM apache_logs LIMIT {limit}'
-        rows = client.execute_iter(sql_req)
-        for row in rows:
-            yield ", ".join([str(i) for i in row ])+"\n"
+        with db_connection.cursor() as cursor:
+            cursor.set_stream_results(True, 1000)
+            cursor.execute(sql_req)
+            for row in cursor:
+                yield ", ".join([str(i) for i in row ])+"\n"
     resp = Response(response=return_data(), content_type="text/csv")
     resp.headers['Content-Disposition']='attachment; filename="export.csv"'
     return resp
@@ -207,25 +234,32 @@ def export_csv(limit: int):
 @app.route('/api/export/parquet/<int:limit>')
 def export_parquet(limit: int):
     def return_data():
-        rows = client.execute_iter(f'SELECT * FROM apache_logs LIMIT {limit}')
-        batches = parquet_get_batches(rows_iterable=rows, chunk_size=50, schema=parquet_logs_schema)
-        buffer = io.BytesIO()
-        with pq.ParquetWriter(buffer, schema=parquet_logs_schema, compression='zstd') as writer:
-            for batch in batches:
+        with db_connection.cursor() as cursor:
+            if limit == 0:
+                sql_req = 'SELECT * FROM apache_logs'
+            else:
+                sql_req =  f'SELECT * FROM apache_logs LIMIT {limit}'
+            cursor.set_stream_results(True, 1000)
+            cursor.execute(sql_req)
+            batches = parquet_get_batches(rows_iterable=cursor, chunk_size=50, schema=parquet_logs_schema)
+            buffer = io.BytesIO()
+            with pq.ParquetWriter(buffer, schema=parquet_logs_schema, compression='zstd') as writer:
+                for batch in batches:
+                    buffer.flush()
+                    writer.write_batch(batch)
+                    buffer.seek(0)
+                    yield buffer.read()
                 buffer.flush()
-                writer.write_batch(batch)
-                buffer.seek(0)
-                yield buffer.read()
-            buffer.flush()
-        buffer.seek(0)
-        yield buffer.read()
+            buffer.seek(0)
+            yield buffer.read()
     resp = Response(response=return_data(), content_type="application/vnd.apache.parquet")
     resp.headers['Content-Disposition']='attachment; filename="export.parquet"'
     return resp
 
 @app.route('/api/graph_show/graph1')
 def graph1_show():
-    df = client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 10')
-    fig = px.line(df, x="timestamp", y="response_time", title='Timestamp to response_time')
-    graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-    return Response(response=graphJSON, status=200, mimetype="application/json")
+    with db_connection.cursor() as cursor:
+        df = cursor._client.query_dataframe('SELECT timestamp, response_time FROM apache_logs LIMIT 10')
+        fig = px.line(df, x="timestamp", y="response_time", title='Timestamp to response_time')
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        return Response(response=graphJSON, status=200, mimetype="application/json")
